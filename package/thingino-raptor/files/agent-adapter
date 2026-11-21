@@ -2317,9 +2317,14 @@ agent_set_storage_setting() {
 			agent_config_set recording enabled "$value" || return 1
 			agent_config_save
 			if [ "$value" = true ]; then
-				agent_ctl rmr enable >/dev/null 2>&1 || true
+				# rmr arms from the config when it starts: "enable" would also trigger a motion clip
+				agent_ctl rmr status 2>/dev/null | grep -q '"enabled": *true' || {
+					agent_stop_rmr
+					agent_ensure_rmr || true
+				}
 			else
 				agent_ctl rmr disable >/dev/null 2>&1 || true
+				[ "$(agent_config_bool timelapse enabled false)" = true ] || agent_stop_rmr
 			fi
 			agent_print_setting_update "$path" autostart "$value"
 			;;
@@ -3282,6 +3287,20 @@ agent_ensure_rmr() {
 		i=$((i + 1))
 	done
 	pidof rmr >/dev/null 2>&1
+}
+
+agent_stop_rmr() {
+	_rmr_pid=$(pidof rmr) || return 0
+	# shellcheck disable=SC2086
+	kill $_rmr_pid 2>/dev/null
+	i=0
+	while [ "$i" -lt 30 ] && pidof rmr >/dev/null 2>&1; do
+		sleep 0.1 2>/dev/null || usleep 100000 2>/dev/null || sleep 1
+		i=$((i + 1))
+	done
+	# shellcheck disable=SC2086
+	pidof rmr >/dev/null 2>&1 && kill -9 $_rmr_pid 2>/dev/null
+	return 0
 }
 
 agent_record() {
